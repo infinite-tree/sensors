@@ -1,8 +1,12 @@
 // Built-in includes
 #include <Arduino.h>
-#include "ConfigTool.h"
+#include "Config.h"
 #include <driver/adc.h>
 #include <WiFi.h>
+
+// DNS doesn't seem to work without these
+#include "lwip/inet.h"
+#include "lwip/dns.h"
 
 #include <Wire.h>
 #include <SparkFunBME280.h>
@@ -20,14 +24,17 @@
 // Sensor Pins
 #define BME_SDA_PIN     21
 #define BME_SDL_PIN     22
-#define WIND_PIN        ADC1_CHANNEL_0 // 36
-#define RAIN_PIN        22
+#define WIND_PIN        ADC1_CHANNEL_0 // VP/36
+#define RAIN_PIN        19
 #define RAIN_GND        23
+#define SOIL_GND        18
+#define SOIL_PIN        ADC1_CHANNEL_3 // VN/39
 
 // How often to send data in milliseconds
 #define TEMP_HUMIDITY_DELAY         30 * 1000
 #define WIND_DELAY                  5 * 1000
 #define RAIN_DELAY                  10 * 1000
+#define SOIL_DELAY                  60 * 1000
 
 
 InfluxArduino influx;
@@ -50,6 +57,7 @@ const char HUMIDITY_MEASUREMENT[] = "humidity_percentage";
 const char PRESSURE_MEASUREMENT[] = "pressure_hpa";
 const char WIND_MEASUREMENT[] = "wind_mph";
 const char RAIN_MEASUREMENT[] = "rain_mm_hr";
+const char SOIL_MEASUREMENT[] = "soil_moisture";
 
 String Tags;
 
@@ -57,27 +65,10 @@ String Tags;
 unsigned long tempHumidLastSent = 0;
 unsigned long windLastSent = 0;
 unsigned long rainLastSent = 0;
+unsigned long soilLastSent = 0;
 
-const char CONFIG_MAGIC[] = "1337";
-struct Config {
-    String Magic;
-    String WifiSSID;
-    String WifiPassword;
 
-    String Location;
-    String Sensor;
-
-    String InfluxHost;
-    String InfluxDatabase;
-    String InfluxUser;
-    String InfluxPassword;
-
-    bool EnableTempSensor;
-    bool EnableWindSensor;
-    bool EnableRainSensor;
-};
 Config config;
-ConfigTool configTool;
 
 
 float mapf(float x, float in_min, float in_max, float out_min, float out_max)
@@ -108,8 +99,8 @@ void sendWindSpeed() {
     int16_t sensorValue = (sensorValue1 + sensorValue2 + sensorValue3)/3;
 
     float scaledValue = 0;
-    Serial.print("ADC: ");
-    Serial.println(sensorValue);
+    // Serial.print("ADC (WIND): ");
+    // Serial.println(sensorValue);
 
     // Scale value 0.4V = 0 m/s, 2.0V = 32.4 m/s
     // Measured voltages:
@@ -221,11 +212,71 @@ void sendTempAndHumidity() {
     //     Serial.println(influx.getResponse());
     // }
 
-    Serial.println("Temp and Humidity sent!");
+    // Serial.println("Temp and Humidity sent!");
 }
 
+void setupSoilSensor() {
+    // Setup soil sensor
+    pinMode(SOIL_PIN, INPUT);
+
+    // Disable probe until ready to read tpo reduce corrosion
+    pinMode(SOIL_GND, OUTPUT);
+    digitalWrite(SOIL_GND, HIGH);
+
+    Serial.println("Soil Sensor initialized");
+}
+
+void sendSoilMoisture() {
+    digitalWrite(SOIL_GND, LOW);
+    // Wait for sensor to become ready
+    delay(20);
+
+    // Set the ADC to 10 bits instead of default of 12 (range = 1024)
+    adc1_config_width(ADC_WIDTH_BIT_10);
+    // Set the attenuation of the Soil sensor pin to 0-3.9V
+    adc1_config_channel_atten(SOIL_PIN, ADC_ATTEN_DB_11);
+    int16_t sensorValue1 = adc1_get_raw(SOIL_PIN);
+    delay(20);
+    int16_t sensorValue2 = adc1_get_raw(SOIL_PIN);
+    delay(20);
+    int16_t sensorValue3 = adc1_get_raw(SOIL_PIN);
+    delay(20);
+
+    // disable soil moisture sensor to reduce corrosion
+    digitalWrite(SOIL_GND, HIGH);
+
+
+    int16_t sensorValue = (sensorValue1 + sensorValue2 + sensorValue3) / 3;
+
+    // Serial.print("ADC (SOIL): ");
+    // Serial.println(sensorValue);
+
+    Serial.print("M = ");
+    Serial.println(sensorValue);
+
+    char fields[16];
+    sprintf(fields, "value=%d", sensorValue);
+
+    if (!influx.write(SOIL_MEASUREMENT, Tags.c_str(), fields))
+    {
+        Serial.print("ERROR sending soil moisture: ");
+        Serial.println(influx.getResponse());
+    }
+}
+
+// void printDNSServers()
+// {
+//     Serial.print("DNS #1, #2 IP: ");
+//     WiFi.dnsIP().printTo(Serial);
+//     Serial.print(", ");
+//     WiFi.dnsIP(1).printTo(Serial);
+//     Serial.println();
+// }
+
 void connectToWifi() {
-    while (true) {
+    WiFi.mode(WIFI_STA);
+    while (true)
+    {
         Serial.print("Connecting to Wifi network ");
         Serial.print(config.WifiSSID);
         Serial.print(" ");
@@ -305,7 +356,7 @@ void askForSettings() {
 
 
     Serial.print("Influxdb host? ");
-    config.InfluxHost = readString();
+    config.InfluxHostname = readString();
     Serial.print("Influxdb database? ");
     config.InfluxDatabase = readString();
     Serial.print("Influxdb username? ");
@@ -323,72 +374,26 @@ void askForSettings() {
     config.EnableWindSensor = readBool();
     Serial.print("Enable Rain Sensor (Y/N)? ");
     config.EnableRainSensor = readBool();
-
+    Serial.print("Enable Soil Sensor (Y/N)? ");
+    config.EnableSoilSensor = readBool();
 
     Serial.println();
 
     config.Magic = CONFIG_MAGIC;
-    configTool.save();
-    Serial.println("Settings saved!");
-}
-
-void printBool(bool value) {
-    if (value) {
-        Serial.println("Yes");
+    saveConfig(config);
+    loadConfig(config);
+    if (config.Magic != CONFIG_MAGIC) {
+        Serial.println("ERROR: failed to save config");
     } else {
-        Serial.println("No");
+        Serial.println("Settings saved!");
     }
-}
-
-void printSettings() {
-    Serial.println("########## Device Setting ##########");
-
-    Serial.print("Wifi SSID: ");
-    Serial.println(config.WifiSSID);
-    Serial.print("Wifi Password: ");
-    Serial.println(config.WifiPassword);
-
-
-    Serial.println();
-
-
-    Serial.print("Location: ");
-    Serial.println(config.Location);
-    Serial.print("Sensor Name: ");
-    Serial.println(config.Sensor);
-
-
-    Serial.println();
-
-
-    Serial.print("Influxdb Host: ");
-    Serial.println(config.InfluxHost);
-    Serial.print("Influxdb Database: ");
-    Serial.println(config.InfluxDatabase);
-    Serial.print("Influxdb Username: ");
-    Serial.println(config.InfluxUser);
-    Serial.print("Influxdb Password: ");
-    Serial.println(config.InfluxPassword);
-
-
-    Serial.println();
-
-
-    Serial.print("Temp Sensor enabled: ");
-    printBool(config.EnableTempSensor);
-    Serial.print("Wind Sensor enabled: ");
-    printBool(config.EnableWindSensor);
-    Serial.print("Rain Sensor enabled: ");
-    printBool(config.EnableRainSensor);
-
-    Serial.println();
 }
 
 void reconfigureCheck() {
     if (Serial.available()) {
         char code = Serial.read();
         if (code == 'i' || code == 'I') {
-            printSettings();
+            printConfig(config);
             return;
         } else if (code == 'c' || code == 'C') {
             // Reconfigure the sensor
@@ -401,24 +406,7 @@ void setup() {
     Serial.begin(115200);
     Serial.println("####### ESP32 Sensor INIT #######");
 
-    // Load Settings if they already exist.
-    configTool.addVariable("Magic", &config.Magic);
-    configTool.addVariable("WifiSSID", &config.WifiSSID);
-    configTool.addVariable("WifiPassword", &config.WifiPassword);
-
-    configTool.addVariable("Location", &config.Location);
-    configTool.addVariable("Sensor", &config.Sensor);
-
-    configTool.addVariable("InfluxHost", &config.InfluxHost);
-    configTool.addVariable("InfluxDatabase", &config.InfluxDatabase);
-    configTool.addVariable("InfluxUser", &config.InfluxUser);
-    configTool.addVariable("InfluxPassword", &config.InfluxPassword);
-
-    configTool.addVariable("EnableTempSensor", &config.EnableTempSensor);
-    configTool.addVariable("EnableWindSensor", &config.EnableWindSensor);
-    configTool.addVariable("EnableRainSensor", &config.EnableRainSensor);
-
-    configTool.load();
+    loadConfig(config);
     if (config.Magic != CONFIG_MAGIC) {
         askForSettings();
     }
@@ -446,10 +434,14 @@ void setup() {
         setupWindSensor();
     }
 
+    if (config.EnableSoilSensor) {
+        setupSoilSensor();
+    }
+
 
     connectToWifi();
 
-    influx.configure(config.InfluxDatabase.c_str(), config.InfluxHost.c_str());
+    influx.configure(config.InfluxDatabase.c_str(), config.InfluxHostname.c_str());
     influx.authorize(config.InfluxUser.c_str(), config.InfluxPassword.c_str());
     influx.addCertificate(ROOT_CERT);
 
@@ -471,6 +463,11 @@ void loop() {
     if (config.EnableRainSensor && (millis() - rainLastSent) > RAIN_DELAY) {
         sendRainfall();
         rainLastSent = millis();
+    }
+
+    if (config.EnableSoilSensor && (millis() - soilLastSent) > SOIL_DELAY) {
+        sendSoilMoisture();
+        soilLastSent = millis();
     }
 
     delay(10);
