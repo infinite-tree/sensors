@@ -41,6 +41,8 @@ struct Config
     String WifiSSID;
     String WifiPassword;
 
+    bool EnableSleepMode;
+
     String Location;
     String Sensor;
 
@@ -53,12 +55,14 @@ struct Config
     bool EnableWindSensor;
     bool EnableRainSensor;
     bool EnableSoilSensor;
+
 };
 
 
 void loadConfig(Config &config);
 void saveConfig(Config &config);
 void printConfig(Config &config);
-
+void askForPreferences(Config &config);
+void askForSettings(Config &config);
 
 #endif
