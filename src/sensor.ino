@@ -2,6 +2,7 @@
 #include <Arduino.h>
 #include "Config.h"
 #include <driver/adc.h>
+#include <math.h>
 #include <WiFi.h>
 
 // To disable wifi chip for sleep mode
@@ -18,6 +19,7 @@
 #include <InfluxArduino.hpp>
 #include "RootCert.hpp"
 
+#include "vpd.h"
 
 // Conversions
 #define MPS_TO_MPH      2.23694
@@ -77,6 +79,7 @@ const char PRESSURE_MEASUREMENT[] = "pressure_hpa";
 const char WIND_MEASUREMENT[] = "wind_mph";
 const char RAIN_MEASUREMENT[] = "rain_mm_hr";
 const char SOIL_MEASUREMENT[] = "soil_moisture";
+const char VPD_MEASUREMENT[] = "vpd_measurement";
 
 RTC_DATA_ATTR String Tags;
 RTC_DATA_ATTR bool firstBoot = true;
@@ -258,6 +261,26 @@ void setupBME280() {
         return;
     }
     Serial.println("BME280 initialized");
+}
+
+void sendVPD(float temperature, float humidity) {
+    float t = round(temperature);
+    float h = round(humidity);
+    for (int x=0; x<VPD_ROWS; x++) {
+        if (VPD_TABLE[x][0] == t) {
+            for (int y=0; y<VPD_COLUMNS; y++) {
+                if (VPD_TABLE[0][y] == h) {
+                    Serial.print("V: ");
+                    Serial.println(VPD_TABLE[x][y]);
+                    String vpd_fields = "value=" + String(VPD_TABLE[x][y]);
+                    sendDatapoint(VPD_MEASUREMENT, Tags.c_str(), vpd_fields.c_str());
+                    return;
+                }
+            }
+        }
+    }
+
+    Serial.println("Unknown VPD");
 }
 
 void sendTempAndHumidity() {
