@@ -36,6 +36,8 @@ void loadConfig(Config &config) {
     config.WifiSSID = doc["WifiSSID"].as<String>();
     config.WifiPassword = doc["WifiPassword"].as<String>();
 
+    config.EnableSleepMode = doc["EnableSleepMode"];
+
     config.Location = doc["Location"].as<String>();
     config.Sensor = doc["Sensor"].as<String>();
 
@@ -51,8 +53,6 @@ void loadConfig(Config &config) {
 
     file.close();
 }
-
-
 
 void saveConfig(Config &config) {
     SPIFFS.begin(true);
@@ -76,6 +76,8 @@ void saveConfig(Config &config) {
 
     doc["WifiSSID"] = config.WifiSSID;
     doc["WifiPassword"] = config.WifiPassword;
+
+    doc["EnableSleepMode"] = config.EnableSleepMode;
 
     doc["Location"] = config.Location;
     doc["Sensor"] = config.Sensor;
@@ -120,14 +122,16 @@ void printConfig(Config &config)
     Serial.println(config.WifiSSID);
     Serial.print("Wifi Password: ");
     Serial.println(config.WifiPassword);
+    Serial.println();
 
+    Serial.print("Sleep Mode Enabled: ");
+    printBool(config.EnableSleepMode);
     Serial.println();
 
     Serial.print("Location: ");
     Serial.println(config.Location);
     Serial.print("Sensor Name: ");
     Serial.println(config.Sensor);
-
     Serial.println();
 
     Serial.print("Influxdb Host: ");
@@ -138,7 +142,6 @@ void printConfig(Config &config)
     Serial.println(config.InfluxUser);
     Serial.print("Influxdb Password: ");
     Serial.println(config.InfluxPassword);
-
     Serial.println();
 
     Serial.print("Temp Sensor enabled: ");
@@ -149,6 +152,124 @@ void printConfig(Config &config)
     printBool(config.EnableRainSensor);
     Serial.print("Soil Sensor enabled: ");
     printBool(config.EnableSoilSensor);
+    Serial.println();
+}
+
+String readString()
+{
+    String value = "";
+    char c;
+    while (true)
+    {
+        if (Serial.available())
+        {
+            c = Serial.read();
+            if (c == '\n' || c == '\r')
+            {
+                // clear anything else that might be waiting
+                c = Serial.read();
+                Serial.println();
+                return value;
+            }
+            else
+            {
+                Serial.print(c);
+                value += c;
+            }
+        }
+        delay(3);
+    }
+}
+
+bool readBool()
+{
+    char c;
+    bool ret = false;
+    while (true)
+    {
+        if (Serial.available())
+        {
+            c = Serial.read();
+            if (c == 'y' || c == 'Y')
+            {
+                Serial.print(c);
+                ret = true;
+            }
+            else if (c == 'n' || c == 'N')
+            {
+                Serial.print(c);
+                ret = false;
+            }
+            else if (c == '\n' || c == '\r')
+            {
+                // clear anything else that might be waiting
+                c = Serial.read();
+                Serial.println();
+                return ret;
+            }
+        }
+        delay(3);
+    }
+}
+
+void askForPreferences(Config &config) {
+
+    Serial.print("Enable Sleep Mode (Y/N)? ");
+    config.EnableSleepMode = readBool();
+    Serial.println();
+
+    Serial.print("Enable Temp Sensor (Y/N)? ");
+    config.EnableTempSensor = readBool();
+    Serial.print("Enable Wind Sensor (Y/N)? ");
+    config.EnableWindSensor = readBool();
+    Serial.print("Enable Rain Sensor (Y/N)? ");
+    config.EnableRainSensor = readBool();
+    Serial.print("Enable Soil Sensor (Y/N)? ");
+    config.EnableSoilSensor = readBool();
 
     Serial.println();
+}
+
+void askForSettings(Config &config)
+{
+    Serial.println("########## Please configure the device ##########");
+
+    Serial.print("Wifi SSID? ");
+    config.WifiSSID = readString();
+    Serial.print("Wifi Password? ");
+    config.WifiPassword = readString();
+
+    Serial.println();
+
+    Serial.print("Device Location? ");
+    config.Location = readString();
+    Serial.print("Sensor name? ");
+    config.Sensor = readString();
+
+    Serial.println();
+
+    Serial.print("Influxdb host? ");
+    config.InfluxHostname = readString();
+    Serial.print("Influxdb database? ");
+    config.InfluxDatabase = readString();
+    Serial.print("Influxdb username? ");
+    config.InfluxUser = readString();
+    Serial.print("Influxdb password? ");
+    config.InfluxPassword = readString();
+
+    Serial.println();
+
+    askForPreferences(config);
+
+    config.Magic = CONFIG_MAGIC;
+    saveConfig(config);
+    loadConfig(config);
+    if (config.Magic != CONFIG_MAGIC)
+    {
+        Serial.println("ERROR: failed to save config");
+    }
+    else
+    {
+        Serial.println("Settings saved!");
+    }
 }
