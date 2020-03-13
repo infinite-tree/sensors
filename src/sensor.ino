@@ -264,12 +264,16 @@ void setupBME280() {
 }
 
 void sendVPD(float temperature, float humidity) {
-    float t = round(temperature);
-    float h = round(humidity);
+    float t = floor(temperature);
+    float h = ceil(humidity);
     for (int x=0; x<VPD_ROWS; x++) {
-        if (VPD_TABLE[x][0] == t) {
+        if (t <= VPD_TABLE[x][0]) {
             for (int y=0; y<VPD_COLUMNS; y++) {
-                if (VPD_TABLE[0][y] == h) {
+                // FIXME: Compiler bug when y=1 causes "Error: unknown opcode or format name 'lsiu'"
+                if ( y == 0) {
+                    continue;
+                }
+                if (h >= VPD_TABLE[0][y]) {
                     Serial.print("V: ");
                     Serial.println(VPD_TABLE[x][y]);
                     String vpd_fields = "value=" + String(VPD_TABLE[x][y]);
