@@ -304,6 +304,8 @@ void sendTempAndHumidity() {
     sendDatapoint(HUMIDITY_MEASUREMENT, Tags.c_str(), humidity_fields.c_str());
     // sendDatapoint(PRESSURE_MEASUREMENT, Tags.c_str(), pressure_fields.c_str());
 
+   sendVPD(temperature, humidity);
+
 }
 
 void setupSoilSensor() {
