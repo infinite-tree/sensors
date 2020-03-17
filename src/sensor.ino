@@ -292,16 +292,20 @@ void sendTempAndHumidity() {
     // float pressure = bme.readFloatPressure() / 100.0F;
     float humidity = bme.readFloatHumidity();
 
+    // LImit decimal places of temp and humidity
+    String temp_str = String(temperature, 2);
+    String hum_str = String(humidity, 2);
+
     Serial.print("T: ");
-    Serial.println(temperature);
+    Serial.println(temp_str);
     Serial.print("H: ");
-    Serial.println(humidity);
+    Serial.println(hum_str);
     // Serial.print("P: ");
     // Serial.println(pressure);
 
     // Setup Influx points to send
-    String temp_fields = "value=" + String(temperature);
-    String humidity_fields = "value=" + String(humidity);
+    String temp_fields = "value=" + temp_str;
+    String humidity_fields = "value=" + hum_str;
     // String pressure_fields = "value=" + String(pressure);
 
     sendDatapoint(TEMP_MEASUREMENT, Tags.c_str(), temp_fields.c_str());
